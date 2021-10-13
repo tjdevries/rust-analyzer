@@ -586,6 +586,7 @@ dependencies = [
  "ide_ssr",
  "indexmap",
  "itertools",
+ "lsp-types",
  "oorandom",
  "profile",
  "pulldown-cmark",

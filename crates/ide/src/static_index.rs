@@ -1,5 +1,5 @@
 //! This module provides `StaticIndex` which is used for powering
-//! read-only code browsers and emitting LSIF
+//! read-only code brow scheme: todo!(), identifier: todo!(), unique: todo!(), kind: todo!()  scheme: todo!(), identifier: todo!(), unique: todo!(), kind: todo!() sers and emitting LSIF
 
 use std::collections::HashMap;
 
@@ -8,6 +8,7 @@ use hir::{db::HirDatabase, Crate, Module};
 use ide_db::base_db::{FileId, FileRange, SourceDatabaseExt};
 use ide_db::defs::Definition;
 use ide_db::RootDatabase;
+use lsp_types::{self, Moniker};
 use rustc_hash::FxHashSet;
 use syntax::{AstNode, SyntaxKind::*, T};
 use syntax::{SyntaxToken, TextRange};
@@ -28,6 +29,9 @@ pub struct StaticIndex<'a> {
     analysis: &'a Analysis,
     db: &'a RootDatabase,
     def_map: HashMap<Definition, TokenId>,
+
+    // TODO: Do impl instead
+    pub moniker_map: HashMap<Definition, Moniker>,
 }
 
 #[derive(Debug)]
@@ -41,6 +45,7 @@ pub struct TokenStaticData {
     pub hover: Option<HoverResult>,
     pub definition: Option<FileRange>,
     pub references: Vec<ReferenceData>,
+    pub moniker: Option<Moniker>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -135,12 +140,18 @@ impl StaticIndex<'_> {
             let id = if let Some(x) = self.def_map.get(&def) {
                 *x
             } else {
+                self.add_moniker(&def);
+
                 let x = self.tokens.insert(TokenStaticData {
                     hover: hover_for_definition(&sema, file_id, def, &node, &hover_config),
                     definition: def
                         .try_to_nav(self.db)
                         .map(|x| FileRange { file_id: x.file_id, range: x.focus_or_full_range() }),
                     references: vec![],
+                    moniker: match self.moniker_map.get(&def) {
+                        Some(moniker) => Some(moniker.clone()),
+                        None => None,
+                    },
                 });
                 self.def_map.insert(def, x);
                 x
@@ -158,6 +169,38 @@ impl StaticIndex<'_> {
         self.files.push(result);
     }
 
+    pub fn add_moniker(&mut self, def: &Definition) {
+        if let Some(vis) = def.visibility(self.db) {
+            if matches!(vis, hir::Visibility::Public) {
+                match def.module(self.db) {
+                    Some(module) => {
+                        let krate = module.krate().display_name(self.db).unwrap();
+                        if krate.to_string() == "core" {
+                            return;
+                        }
+
+                        let module_name = match module.name(self.db) {
+                            Some(module_name) => module_name.to_string(),
+                            None => return,
+                        };
+
+                        let name = def.name(self.db).unwrap().to_string();
+                        let id = format!("{}:{}:{}", krate, module_name, name);
+                        let moniker = lsp_types::Moniker {
+                            scheme: "rust-analyzer".to_string(),
+                            identifier: id,
+                            unique: lsp_types::UniquenessLevel::Scheme,
+                            kind: Some(lsp_types::MonikerKind::Export),
+                        };
+                        // eprintln!("VISIBLE: {:?}", moniker);
+
+                        self.moniker_map.insert(*def, moniker);
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
     pub fn compute<'a>(analysis: &'a Analysis) -> StaticIndex<'a> {
         let db = &*analysis.db;
         let work = all_modules(db).into_iter().filter(|module| {
@@ -172,6 +215,7 @@ impl StaticIndex<'_> {
             analysis,
             db,
             def_map: Default::default(),
+            moniker_map: Default::default(),
         };
         let mut visited_files = FxHashSet::default();
         for module in work {

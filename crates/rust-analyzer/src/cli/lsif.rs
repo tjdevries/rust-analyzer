@@ -160,6 +160,10 @@ impl LsifManager<'_> {
                 in_v: result_id.into(),
                 out_v: result_set_id.into(),
             }));
+
+            if let Some(moniker) = token.moniker {
+                self.add_vertex(lsif::Vertex::Moniker(moniker));
+            }
         }
         if !token.references.is_empty() {
             let result_id = self.add_vertex(lsif::Vertex::ReferenceResult);
@@ -242,6 +246,7 @@ impl flags::Lsif {
         let manifest = ProjectManifest::discover_single(&path)?;
 
         let workspace = ProjectWorkspace::load(manifest, &cargo_config, no_progress)?;
+        eprintln!("Workspace loaded...");
 
         let (host, vfs, _proc_macro) = load_workspace(workspace, &load_cargo_config)?;
         let db = host.raw_database();
